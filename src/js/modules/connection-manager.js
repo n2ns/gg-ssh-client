@@ -31,11 +31,46 @@ class ConnectionManager {
     // 初始化事件监听
     this.initEventListeners();
     
-    // 加载保存的连接
+    // 通过主进程加载保存的连接（config.json）
     this.loadConnections();
-    
+
+    // 设置IPC监听：加载/保存/删除结果
+    if (window.electron && window.electron.on) {
+      window.electron.on('connections-loaded', (connections) => {
+        // 若config.json为空且本地有旧localStorage数据，则迁移
+        try {
+          if ((!connections || connections.length === 0)) {
+            const legacy = localStorage.getItem('connections');
+            if (legacy) {
+              const legacyConns = JSON.parse(legacy);
+              legacyConns.forEach(c => window.electron.saveConnection(c));
+              // 迁移后清理localStorage，防止双写
+              localStorage.removeItem('connections');
+              return; // 等待后续 connection-saved 通知
+            }
+          }
+        } catch (e) { console.warn('迁移旧连接数据失败:', e); }
+
+        this.connections = Array.isArray(connections) ? connections : [];
+        this.renderConnectionList();
+        document.dispatchEvent(new CustomEvent('connections-updated'));
+      });
+
+      window.electron.on('connection-saved', (connections) => {
+        this.connections = Array.isArray(connections) ? connections : [];
+        this.renderConnectionList();
+        document.dispatchEvent(new CustomEvent('connections-updated'));
+      });
+
+      window.electron.on('connection-deleted', (connections) => {
+        this.connections = Array.isArray(connections) ? connections : [];
+        this.renderConnectionList();
+        document.dispatchEvent(new CustomEvent('connections-updated'));
+      });
+    }
+
     console.log('连接管理器初始化完成');
-    
+
     // 通知其他组件连接管理器已准备就绪
     setTimeout(() => {
       document.dispatchEvent(new CustomEvent('connection-manager-ready'));
@@ -191,12 +226,13 @@ class ConnectionManager {
       console.log('添加新连接成功:', connection.name);
     }
     
-    // 保存连接到本地存储
-    this.saveConnections();
-    
-    // 触发连接更新事件
-    document.dispatchEvent(new CustomEvent('connections-updated'));
-    
+    // 通过主进程保存（写入config.json）
+    if (window.electron && window.electron.saveConnection) {
+      window.electron.saveConnection(connection);
+    } else {
+      console.error('Electron API 不可用，无法保存连接到配置文件');
+    }
+
     // 隐藏模态框
     this.connectionModal.style.display = 'none';
   }
@@ -334,16 +370,17 @@ class ConnectionManager {
       // 从数组中移除
       this.connections = this.connections.filter(c => c.id !== this.currentConnectionForContext.id);
       
-      // 保存到本地存储
-      this.saveConnections();
-      
+      // 保存到配置文件
+      if (window.electron && window.electron.deleteConnection) {
+        window.electron.deleteConnection(this.currentConnectionForContext.name);
+      } else {
+        console.error('Electron API 不可用，无法删除连接');
+      }
+
       console.log('删除连接成功');
-      
+
       // 隐藏上下文菜单
       this.hideContextMenu();
-      
-      // 触发连接更新事件
-      document.dispatchEvent(new CustomEvent('connections-updated'));
     } else {
       console.log('用户取消删除连接');
     }
@@ -393,35 +430,17 @@ class ConnectionManager {
     event.stopPropagation();
   }
   
-  // 加载连接列表
+  // 加载连接列表（从主进程/config.json）
   loadConnections() {
     try {
-      const savedConnections = localStorage.getItem('connections');
-      if (savedConnections) {
-        this.connections = JSON.parse(savedConnections);
-        
-        // 确保所有连接都有唯一ID
-        this.connections = this.connections.map(conn => {
-          if (!conn.id) {
-            conn.id = this.generateId();
-          }
-          return conn;
-        });
-        
-        console.log(`已加载 ${this.connections.length} 个连接`);
+      if (window.electron && window.electron.getConnections) {
+        window.electron.getConnections();
       } else {
-        console.log('没有保存的连接配置');
-        // 添加测试连接
-        this.addTestConnections();
+        console.error('Electron API 不可用，无法加载连接');
       }
-      
-      // 通知已加载连接
-      document.dispatchEvent(new CustomEvent('connections-updated'));
     } catch (error) {
       console.error('加载连接配置失败:', error);
       this.connections = [];
-      // 添加测试连接
-      this.addTestConnections();
     }
   }
   
@@ -486,34 +505,11 @@ class ConnectionManager {
       // 保存DOM引用
       this.connectionItems[conn.id] = item;
       
-      // 防抖标志，防止重复点击
-      let isConnecting = false;
-      
-      // 点击连接到服务器 - 添加防抖逻辑
+      // 点击连接到服务器 - 立即响应（无防抖）
       item.addEventListener('click', function(clickEvent) {
-        // 如果正在连接中，不执行任何操作
-        if (isConnecting) {
-          console.log('连接操作正在进行中，忽略重复点击:', conn.name);
-          return;
-        }
-        
-        // 设置防抖标志
-        isConnecting = true;
-        
-        // 添加视觉反馈
-        item.classList.add('connecting');
-        
         console.log('连接到服务器:', conn.name);
-        
-        // 使用事件触发通知其他模块创建连接
         const connectEvent = new CustomEvent('connect-to-server', { detail: conn });
         document.dispatchEvent(connectEvent);
-        
-        // 2秒后重置防抖标志，允许再次点击
-        setTimeout(() => {
-          isConnecting = false;
-          item.classList.remove('connecting');
-        }, 2000);
       });
       
       // 右键显示上下文菜单
@@ -531,18 +527,9 @@ class ConnectionManager {
     return this.connections;
   }
   
-  // 保存连接到本地存储
+  // 已迁移到主进程，通过IPC保存
   saveConnections() {
-    try {
-      localStorage.setItem('connections', JSON.stringify(this.connections));
-      console.log(`已保存 ${this.connections.length} 个连接`);
-      
-      // 通知连接已更新
-      document.dispatchEvent(new CustomEvent('connections-updated'));
-    } catch (error) {
-      console.error('保存连接配置失败:', error);
-      alert('保存连接失败: ' + error.message);
-    }
+    console.warn('saveConnections 已弃用，请通过 window.electron.saveConnection 使用逐条保存');
   }
   
   /**

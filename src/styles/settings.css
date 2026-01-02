@@ -1,10 +1,12 @@
-/* 设置模态框样式 */
-.settings-modal-content {
-  max-width: 600px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
+/* 设置右侧面板样式：占满右侧窗口内容的全宽度 */
+.settings-panel {
+  position: absolute; top: 0; right: 0; height: 100%; width: 100%;
+  background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow);
+  display: none; z-index: 1000; align-items: stretch; justify-content: flex-start;
 }
+
+.settings-modal-content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+
 
 .settings-form {
   display: flex;
@@ -57,10 +59,10 @@ select.form-control {
 }
 
 /* 亮色主题样式 */
-body[data-theme="light"] .settings-modal-content {
-  background-color: #f5f5f5;
-  color: #333;
+body[data-theme="light"] .settings-panel {
+  background-color: #f5f5f5; color: #333;
 }
+body[data-theme="light"] .settings-modal-content { color: #333; }
 
 body[data-theme="light"] .settings-section h3 {
   color: #2980b9;

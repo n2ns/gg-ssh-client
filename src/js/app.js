@@ -4,6 +4,10 @@
 class App {
   constructor() {
     console.log('App构造函数开始执行');
+    // 连接进行中时：记录连接ID -> 标签索引（再次点击只切换，不新建）
+    this._pendingConnectionTabs = {};
+    // 连接失败时：记录连接ID -> 标签索引（再次点击只切换，不新建）
+    this._failedConnectionTabs = {};
     // 不在这里初始化，等待所有模块加载完成
   }
   
@@ -133,6 +137,37 @@ class App {
         console.log('应用初始化完成');
         document.dispatchEvent(new CustomEvent('app-initialized'));
       }, 100);
+
+      // 监听标签关闭，维护失败/进行中映射
+      document.addEventListener('tab-closed', (event) => {
+        const closedIndex = event.detail.index;
+        // 从失败映射中清理
+        for (const [connId, tabIdx] of Object.entries(this._failedConnectionTabs)) {
+          if (tabIdx === closedIndex) delete this._failedConnectionTabs[connId];
+          else if (tabIdx > closedIndex) this._failedConnectionTabs[connId] = tabIdx - 1;
+        }
+        // 从进行中映射中清理
+        for (const [connId, tabIdx] of Object.entries(this._pendingConnectionTabs)) {
+          if (tabIdx === closedIndex) delete this._pendingConnectionTabs[connId];
+          else if (tabIdx > closedIndex) this._pendingConnectionTabs[connId] = tabIdx - 1;
+        }
+      });
+
+      // 监听连接成功/失败事件，维护映射
+      document.addEventListener('ssh-connected', (event) => {
+        const { connectionId, tabIndex } = event.detail || {};
+        if (connectionId !== undefined) {
+          delete this._failedConnectionTabs[connectionId];
+          delete this._pendingConnectionTabs[connectionId];
+        }
+      });
+      document.addEventListener('ssh-connect-failed', (event) => {
+        const { connectionId, tabIndex } = event.detail || {};
+        if (connectionId !== undefined && tabIndex !== undefined) {
+          this._failedConnectionTabs[connectionId] = tabIndex;
+          delete this._pendingConnectionTabs[connectionId];
+        }
+      });
     } catch (error) {
       console.error('初始化模块失败:', error);
       alert(`初始化模块失败: ${error.message}`);
@@ -264,43 +299,38 @@ class App {
   
   // 连接到服务器
   connectToServer(connection) {
-    // 使用连接ID作为唯一标识
     const connectionId = connection.id;
-    
-    // 检查该连接是否已经在连接中
-    if (this._connectingIds && this._connectingIds[connectionId]) {
-      console.log('该连接正在进行中，忽略重复请求:', connection.name);
+
+    // 规则：
+    // - 若该连接“正在连接中”或“此前失败过”且保留标签，则切换到对应标签，不新建
+    // - 仅当此前连接成功（即不在 pending/failed 集合中）时，再次点击才新建新标签
+    const pendingTab = this._pendingConnectionTabs[connectionId];
+    const failedTab = this._failedConnectionTabs[connectionId];
+    if (pendingTab !== undefined) {
+      this.tabManager.switchTab(pendingTab);
       return;
     }
-    
-    // 初始化连接中的ID列表（如果不存在）
-    if (!this._connectingIds) {
-      this._connectingIds = {};
+    if (failedTab !== undefined) {
+      this.tabManager.switchTab(failedTab);
+      return;
     }
-    
-    // 标记该连接正在进行中
-    this._connectingIds[connectionId] = true;
-    
+
     console.log('开始连接到服务器:', connection.name);
-    
+
     // 创建新标签页
     const tabIndex = this.tabManager.addTab(connection.name);
-    
+    // 记录为“正在连接中”
+    this._pendingConnectionTabs[connectionId] = tabIndex;
+
     // 切换到新标签页
     this.tabManager.switchTab(tabIndex);
-    
+
     // 创建终端
     setTimeout(() => {
       try {
         this.terminalManager.createTerminal(tabIndex, connection);
       } catch (error) {
         console.error('创建终端失败:', error);
-      } finally {
-        // 无论连接成功或失败，2秒后清除连接状态
-        setTimeout(() => {
-          console.log('重置连接状态:', connection.name);
-          delete this._connectingIds[connectionId];
-        }, 2000);
       }
     }, 100);
   }

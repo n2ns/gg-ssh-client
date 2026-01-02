@@ -202,7 +202,8 @@ ipcMain.handle('ssh-connect', async (event, connection) => {
       host: connection.host,
       port: connection.port,
       username: connection.username,
-      keepaliveInterval: 10000
+      keepaliveInterval: 10000,
+      readyTimeout: (connection.sshReadyTimeoutSec ? Number(connection.sshReadyTimeoutSec) * 1000 : 45000)
     };
     
     // 根据认证类型设置不同的选项

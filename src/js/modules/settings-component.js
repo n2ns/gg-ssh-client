@@ -12,7 +12,8 @@ class SettingsComponent {
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, Courier New, monospace',
       cursorBlink: true,
-      scrollback: 1000
+      scrollback: 1000,
+      sshReadyTimeoutSec: 45 // SSH握手超时（秒）
     };
     
     // 标记设置界面是否正在显示
@@ -38,12 +39,13 @@ class SettingsComponent {
     // 创建模态框容器
     this.modal = document.createElement('div');
     this.modal.id = 'settings-modal';
-    this.modal.className = 'modal';
+    // 改为右侧面板而非全屏遮罩
+    this.modal.className = 'settings-panel';
     this.modal.style.display = 'none';
-    
-    // 创建模态框内容
+
+    // 创建内容容器
     const modalContent = document.createElement('div');
-    modalContent.className = 'modal-content settings-modal-content';
+    modalContent.className = 'settings-modal-content';
     
     // 创建关闭按钮
     const closeBtn = document.createElement('span');
@@ -145,13 +147,13 @@ class SettingsComponent {
     // 字体大小设置
     const fontSizeGroup = document.createElement('div');
     fontSizeGroup.className = 'form-group';
-    
+
     const fontSizeLabel = document.createElement('label');
     fontSizeLabel.htmlFor = 'font-size';
     fontSizeLabel.id = 'font-size-label';
     fontSizeLabel.textContent = '字体大小';
     fontSizeGroup.appendChild(fontSizeLabel);
-    
+
     const fontSizeInput = document.createElement('input');
     fontSizeInput.type = 'number';
     fontSizeInput.id = 'font-size';
@@ -160,8 +162,28 @@ class SettingsComponent {
     fontSizeInput.max = '24';
     fontSizeInput.step = '1';
     fontSizeGroup.appendChild(fontSizeInput);
-    
+
+    // SSH 准备超时（秒）
+    const sshTimeoutGroup = document.createElement('div');
+    sshTimeoutGroup.className = 'form-group';
+
+    const sshTimeoutLabel = document.createElement('label');
+    sshTimeoutLabel.htmlFor = 'ssh-ready-timeout';
+    sshTimeoutLabel.id = 'ssh-ready-timeout-label';
+    sshTimeoutLabel.textContent = 'SSH连接超时（秒）';
+    sshTimeoutGroup.appendChild(sshTimeoutLabel);
+
+    const sshTimeoutInput = document.createElement('input');
+    sshTimeoutInput.type = 'number';
+    sshTimeoutInput.id = 'ssh-ready-timeout';
+    sshTimeoutInput.className = 'form-control';
+    sshTimeoutInput.min = '5';
+    sshTimeoutInput.max = '300';
+    sshTimeoutInput.step = '5';
+    sshTimeoutGroup.appendChild(sshTimeoutInput);
+
     terminalSection.appendChild(fontSizeGroup);
+    terminalSection.appendChild(sshTimeoutGroup);
     
     // 字体设置
     const fontFamilyGroup = document.createElement('div');
@@ -232,8 +254,14 @@ class SettingsComponent {
     modalContent.appendChild(buttonGroup);
     this.modal.appendChild(modalContent);
     
-    // 添加到DOM
-    document.body.appendChild(this.modal);
+    // 添加到DOM（添加到右侧主内容区域内，使其占满右侧区域）
+    const mainContent = document.querySelector('.main-content') || document.body;
+    mainContent.appendChild(this.modal);
+
+    // 点击面板外部关闭
+    this.modal.addEventListener('click', (e) => {
+      if (e.target === this.modal) this.hideModal();
+    });
   }
   
   /**
@@ -321,6 +349,10 @@ class SettingsComponent {
     
     // 更新字体
     document.getElementById('font-family').value = this.settings.fontFamily;
+
+    // 更新 SSH 超时（秒）
+    const t = document.getElementById('ssh-ready-timeout');
+    if (t) t.value = this.settings.sshReadyTimeoutSec;
   }
   
   /**
@@ -335,7 +367,8 @@ class SettingsComponent {
         fontSize: parseInt(document.getElementById('font-size').value, 10),
         fontFamily: document.getElementById('font-family').value,
         cursorBlink: this.settings.cursorBlink, // 保留原值
-        scrollback: this.settings.scrollback // 保留原值
+        scrollback: this.settings.scrollback, // 保留原值
+        sshReadyTimeoutSec: parseInt(document.getElementById('ssh-ready-timeout').value, 10) || this.settings.sshReadyTimeoutSec
       };
       
       // 检查是否有变化

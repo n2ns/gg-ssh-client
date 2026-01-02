@@ -191,32 +191,62 @@ class TerminalManager {
   async connectSSH(tabIndex, connection) {
     const terminal = this.terminals[tabIndex];
     if (!terminal) return;
-    
+
     try {
       terminal.write(`正在连接到 ${connection.host}:${connection.port}...\r\n`);
-      
-      // 使用Electron的IPC通信连接SSH
-      const result = await window.electron.connectSSH(connection);
-      
+
+      // 使用Electron的IPC通信连接SSH（附带超时配置）
+      const result = await window.electron.connectSSH({
+        ...connection,
+        sshReadyTimeoutSec: (window.settingsComponent && window.settingsComponent.settings && window.settingsComponent.settings.sshReadyTimeoutSec) ? window.settingsComponent.settings.sshReadyTimeoutSec : 45
+      });
+
       if (result && result.id) {
         terminal.write(`连接成功\r\n\r\n`);
-        
+
         // 存储连接ID
         terminal.connectionId = result.id;
-        
+
+        // 通知应用连接成功（用于清理失败映射）
+        try {
+          document.dispatchEvent(new CustomEvent('ssh-connected', {
+            detail: { connectionId: connection.id, tabIndex }
+          }));
+        } catch (e) {
+          console.warn('派发ssh-connected事件失败:', e);
+        }
+
         // 监听SSH数据
         const removeDataListener = window.electron.onSSHData(result.id, (data) => {
           terminal.write(data);
         });
-        
+
         // 处理终端输入
         terminal.onData((data) => {
           window.electron.sendSSHData(result.id, data);
         });
+      } else {
+        // 结果异常视为失败
+        const message = '未知的连接结果';
+        terminal.write(`\r\n连接失败: ${message}\r\n`);
+        try {
+          document.dispatchEvent(new CustomEvent('ssh-connect-failed', {
+            detail: { connectionId: connection.id, tabIndex, message }
+          }));
+        } catch (e) {
+          console.warn('派发ssh-connect-failed事件失败:', e);
+        }
       }
     } catch (error) {
       console.error('SSH连接失败:', error);
       terminal.write(`\r\n连接失败: ${error.message}\r\n`);
+      try {
+        document.dispatchEvent(new CustomEvent('ssh-connect-failed', {
+          detail: { connectionId: connection.id, tabIndex, message: error.message }
+        }));
+      } catch (e) {
+        console.warn('派发ssh-connect-failed事件失败:', e);
+      }
     }
   }
   
